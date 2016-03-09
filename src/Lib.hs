@@ -16,8 +16,8 @@ import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
-import Data.Bytestring (Bytestring)
-import qualified Data.Bytestring as Bstr
+import Data.ByteString (Bytestring)
+import qualified Data.ByteString as Bstr
 
 data User = User { username :: Bytestring
                  , userSocket :: Socket
