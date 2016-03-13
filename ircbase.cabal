@@ -22,7 +22,6 @@ library
                      , bytestring
                      , stm
                      , time
-                     , terminal-size
                      , ansi-terminal
   default-language:    Haskell2010
 
