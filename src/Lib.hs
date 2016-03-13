@@ -7,7 +7,10 @@ import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Concurrent.Chan
+import Control.Concurrent.STM
 import Control.Concurrent.STM.TChan
+import Control.Monad
+import Data.Monoid
 
 import Data.Time.Calendar
 import Data.Time.Clock
@@ -17,11 +20,11 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import qualified Network.Socket as NSock
+import Network.Socket
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as Bstr
-import Data.Bytesting.Builder
+import Data.ByteString.Builder
 
 msgTimeOut :: Int
 msgTimeOut = 100
@@ -39,7 +42,7 @@ data Msg = Msg { msgTime :: UTCTime
     deriving (Show, Eq, Ord)
 
 utcToBuilder :: UTCTime -> Builder
-utcToBuilder t = stringUTF8 $ utctDay t
+utcToBuilder t = stringUtf8 $ utctDay t
 
 msgToBuilder :: Msg -> Builder
 msgToBuilder msg = byteString "<" <> username <>. " " <> room <> time <>. ">" <>." " <> cont <>. "\n"
@@ -61,7 +64,7 @@ getMsgs user = liftM sort $ Map.foldr (concat) (return []) (tchs)
     where concat acc tc = liftM2 (++) acc $ qdMsgs tc
           tchs = userRooms user
 
-qdMsgs :: TChan Bytestring -> STM [Msg]
+qdMsgs :: TChan ByteString -> STM [Msg]
 qdMsgs tc = do
     elem <- tryReadTChan tc
     return $ case elem of
@@ -102,7 +105,7 @@ getUserRooms = return $ Set.singleton ""
 
 acceptAndFork :: Socket -> MVar (Map ByteString (TChan Msg)) -> IO ()
 acceptAndFork sock rooms = do
-    (hand, _, _) <- accept sock
+    (hand, _, _) <- NSock.accept sock
     forkIO $ newUser hand rooms
 
 addRoom :: ByteString -> Map ByteString (TChan Msg) -> STM (Map ByteString (TChan Msg))
