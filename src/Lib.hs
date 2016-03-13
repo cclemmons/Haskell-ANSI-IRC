@@ -43,6 +43,19 @@ data Msg = Msg { msgTime :: UTCTime
                , msgCont :: ByteString}
     deriving (Eq, Ord)
 
+--announce :: User -> IO ()
+--announce user = do
+--    let announce = systemMsg (username user ++ " has entered")
+--    atomically $ Map.foldl (\acc room -> do acc >> announce room) (return ()) (userRooms user)
+--    where
+--        foldfn acc room = do
+            
+
+systemMsg :: ByteString -> ByteString -> IO Msg
+systemMsg str room = do
+    t <- getCurrentTime
+    return $ Msg t "System" room str
+
 utcToBuilder :: UTCTime -> Builder
 utcToBuilder t = integerDec year <>. "-" <> intDec mon <>. "-" <> intDec day
     where
@@ -105,7 +118,9 @@ newUser hand rooms' = do
     rooms <- readMVar rooms'
     --room <- getUserRooms hand
     usrrooms <- atomically $ dupRooms rooms
-    userHandler $ User name hand "" usrrooms
+    let user = User name hand "" usrrooms
+    --announce user
+    userHandler user
 
 -- prompts user for name
 getUsername :: Handle -> IO ByteString
