@@ -7,213 +7,112 @@ import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Concurrent.Chan
+import Control.Concurrent.STM.TChan
 
-import Network.Simple.TCP
-import qualified Network.Socket as NSock
+import Data.Time.Calendar
+import Data.Time.Clock
+
 import System.IO
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import qualified Network.Socket as NSock
 
-import Data.ByteString (Bytestring)
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as Bstr
+import Data.Bytesting.Builder
 
-data User = User { username :: Bytestring
-                 , userSocket :: Socket
-                 , userHost :: SockAddr
-                 , nextMsg :: Condition
-                 , userRooms :: Map Bytestring Chan
-                 , userPresence :: Mutex}
+msgTimeOut :: Int
+msgTimeOut = 100
 
-data Room = Room { roomName :: Bytestring
-                 , roomMsgQ :: Chan
-                 , roomUsers :: MVar Set User}
+data User = User { username :: ByteString
+                 , userHndl :: Handle
+                 , userActv :: ByteString
+                 , userRooms :: Map ByteString (TChan Msg)}
+    deriving (Show, Eq)
 
-instance Eq Room where
-    x == y = roomName x == roomName y
+data Msg = Msg { msgTime :: UTCTime
+               , msgSender :: ByteString
+               , msgRoom :: ByteString
+               , msgCont :: ByteString}
+    deriving (Show, Eq, Ord)
 
-data Mutex = MVar ()
+utcToBuilder :: UTCTime -> Builder
+utcToBuilder t = stringUTF8 $ utctDay t
 
-data Condition = MVar String
+msgToBuilder :: Msg -> Builder
+msgToBuilder msg = byteString "<" <> username <>. " " <> room <> time <>. ">" <>." " <> cont <>. "\n"
+    where
+        username = byteString $ msgSender msg
+        room = byteString $ msgRoom msg
+        cont = byteString $ msgCont msg
+        time = utcToBuilder $ msgTime msg
+        a <>. b = a <> byteString b
 
--- on user startup
-getUser :: Socket -> SockAddr -> IO User
-getUser sock addr = do
-    name <- getUsername sock
-    return $ User name sock addr
+sendMsgs :: User -> IO ()
+sendMsgs user = do
+    let handle = userHndl user
+    msgs <- atomically $ getMsgs user
+    foldl () ((>>) . hPutBuilder . msgToBuilder) msgs
+
+getMsgs :: User -> STM [Msg]
+getMsgs user = liftM sort $ Map.foldr (concat) (return []) (tchs)
+    where concat acc tc = liftM2 (++) acc $ qdMsgs tc
+          tchs = userRooms user
+
+qdMsgs :: TChan Bytestring -> STM [Msg]
+qdMsgs tc = do
+    elem <- tryReadTChan tc
+    return $ case elem of
+                Nothing -> [] 
+                Just x -> (qdMsgs tc):x[]
+
+userHandler :: User -> IO ()
+userHandler user = do
+    let handle = userHndl user
+    ready <- hWaitForInput handle msgTimeOut
+    if ready then recvMsg user else ()
+    sendMsgs user
+    userHandler user
+
+recvMsg :: User -> IO ()
+recvMsg user = do
+    bstr <- Bstr.hGetLine
+    t <- getCurrentTime
+    let msg = Msg t (username user) (userActv user) bstr
+    atomically $ writeTchan ((userRooms user) Map.! (userActv user)) msg
+
+newUser :: Handle -> MVar (Map ByteString (TChan Msg))-> IO ()
+newUser hand rooms' = do
+    name <- getUsername hand
+    rooms <- readMVar rooms'
+    --room <- getUserRooms hand
+    userHandler $ User name hand "" rooms
 
 -- prompts user for name
-getUsername :: Socket -> IO Bytestring
-getUsername sock = do
-    send "Please Enter a Username: "
-    (name, len) <- recvLen 16
-    if len <= 16 return name else return $ getUsername sock
+getUsername :: Handle -> IO ByteString
+getUsername hand = do
+    Bstr.hPut hand "Please Enter a Username: "
+    name <- Bstr.hGetLine hand
+    return name
 
-sendUser :: Bytestring -> IO ()
-sendUser = send . userSocket
+getUserRooms :: Handle -> IO (Set ByteString)
+getUserRooms = return $ Set.singleton ""
 
-getMsg :: User -> IO ByteString
-getMsg = takeMvar . nextMsg
+acceptAndFork :: Socket -> MVar (Map ByteString (TChan Msg)) -> IO ()
+acceptAndFork sock rooms = do
+    (hand, _, _) <- accept sock
+    forkIO $ newUser hand rooms
 
-sendUserMsg :: User -> Bytestring -> IO ()
-sendUserMsg user = sendUser user $ getMsg user
+addRoom :: ByteString -> Map ByteString (TChan Msg) -> STM (Map ByteString (TChan Msg))
+addRoom name map = do
+    tc <- newTChan
+    return $ Map.insertWith (flip const) name tc map
 
-userloop :: User -> Set Room -> IO ()
-userloop user rooms = do
-    sendUserMsg user
-    msg <- recvMsg user
-    handleMsg msg user
-    userloop
-
-userHandler :: IO ()
-userHandler sock addr = do
-    newuser <- getUser sock addr
-    userloop newuser
-
-handleMsg :: Maybe Bytestring -> IO ()
-handleMsg msg user = do
-    Map.map (\ch -> writeChan ch msg) (userRooms user)
-
-
-newRoom :: Bytestring -> IO Room
-newRoom str = do
-    ch <- newChan
-    let room = Room str ch
-    forkIO $ roomHandler room
-    return room
-
-roomHandler :: Room -> IO ()
-roomHandler room = do
-
-mainapp :: IO ()
-mainapp = do
-    users = newEmptyMVar
-    rooms = Set.singleton $ newRoom ""
-    serve (Host "12.7.0.0.1") "80" (newUser rooms users)
-
-main :: IO ()
-main = serve (Host "12.7.0.0.1") "80" userHandler
-
---netcat :: String -> String -> IO ()
---netcat host port = do
---  -- Extract address from first AddrInfo in list
---  AddrInfo{ addrAddress = addr, addrFamily = family }:_
---      <- getAddrInfo Nothing (Just host) (Just port)
-
---  -- Create a TCP socket connected to server
---  s <- socket family Stream 0
---  connect s addr
-
---  -- Convert socket to handle
---  h <- socketToHandle s ReadWriteMode
---  hSetBuffering h NoBuffering  -- THIS IS IMPORTANT
-
---  -- Punt on complex locale stuff
---  hSetBinaryMode stdout True
-
---  -- Copy data back and forth taking advantage of laziness
---  done <- newEmptyMVar
---  forkIO $ (hGetContents h >>= putStr) `finally` putMVar done ()
---  getContents >>= hPutStr h
---  takeMVar done
-
-
-
---data Move = Rock | Paper | Scissors deriving (Eq, Read, Show, Enum, Bounded)
-
---data Outcome = Lose | Tie | Win deriving (Show, Eq, Ord)
-
----- | @outcome our_move their_move@
---outcome :: Move -> Move -> Outcome
---outcome Rock Scissors        = Win
---outcome Paper Rock           = Win
---outcome Scissors Paper       = Win
---outcome us them | us == them = Tie
---                | otherwise  = Lose
-
---parseMove :: String -> Maybe Move
---parseMove str = case reads str of
---  [(m, rest)] | ok rest -> Just m
---  _                     -> Nothing
---  where ok = all (`elem` " \r\n")
-
---getMove :: Handle -> IO Move
---getMove h = do
---  hPutStrLn h $ "Please enter one of " ++ show ([minBound..] :: [Move])
---  input <- hGetLine h
---  case parseMove input of Just move -> return move
---                          Nothing -> getMove h
-
---computerVsUser :: Move -> Handle -> IO ()
---computerVsUser computerMove h = do
---  userMove <- getMove h
---  let o = outcome userMove computerMove
---  hPutStrLn h $ "You " ++ show o
-
---withTty :: (Handle -> IO a) -> IO a
---withTty = withFile "/dev/tty" ReadWriteMode
-
---withClient :: PortID -> (Handle -> IO a) -> IO a
---withClient listenPort fn = do
---  s <- listenOn listenPort
---  (h, host, port) <- accept s
---  putStrLn $ "Connection from host " ++ host ++ " port " ++ show port
---  sClose s  -- Only accept one client
---  a <- fn h
---  hClose h
---  return a
-
---main :: IO ()
---main = withClient (PortNumber 3000) (chatClient)
-
---module Main where
---import Control.Concurrent
---import Control.Exception
---import Network
---import System.IO
-
---data Move = Rock | Paper | Scissors deriving (Eq, Read, Show, Enum, Bounded)
-
---data Outcome = Lose | Tie | Win deriving (Show, Eq, Ord)
-
---parseMove :: String -> Maybe Move
---parseMove str = case reads str of
---  [(m, rest)] | ok rest -> Just m
---  _                     -> Nothing
---  where ok = all (`elem` " \r\n")
-
---getMove :: Handle -> IO Move
---getMove h = do
---  hPutStrLn h $ "Please enter one of " ++ show ([minBound..] :: [Move])
---  input <- hGetLine h
---  case parseMove input of Just move -> return move
---                          Nothing -> getMove h
-
---computerVsUser :: Move -> Handle -> IO ()
---computerVsUser computerMove h = do
---  userMove <- getMove h
---  let o = outcome userMove computerMove
---  hPutStrLn h $ "You " ++ show o
-
---withTty :: (Handle -> IO a) -> IO a
---withTty = withFile "/dev/tty" ReadWriteMode
-
---withClient :: PortID -> (Handle -> IO a) -> IO a
---withClient listenPort fn =
---  bracket (listenOn listenPort) sClose $ \s -> do
---    bracket (accept s) (\(h, _, _) -> hClose h) $
---      \(h, host, port) -> do
---        putStrLn $ "Connection from host " ++ host ++ " port " ++ show port
---        fn h
-
----- You may find defining this function useful
---play :: MVar Move -> MVar Move -> (Handle, HostName, PortNumber) -> IO ()
---play myMoveMVar opponentMoveMVar (h, host, port) = undefined
-
----- You should define this function
---netrock :: PortID -> IO ()
---netrock listenPort = undefined
-
---main :: IO ()
---main = netrock (PortNumber 1617)
+mainapp :: String -> IO ()
+mainapp port = do
+    startingRooms <- (atomically $ addRoom "" Map.Empty)
+    let rooms = newMVar startingRooms 
+    sock <- listenOn port
+    forever $ acceptAndFork sock rooms
