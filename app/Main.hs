@@ -1,6 +1,7 @@
 module Main where
 
 import Lib
+import Network
 
 main :: IO ()
-main = someFunc
+main = mainApp (PortNumber 3000)
