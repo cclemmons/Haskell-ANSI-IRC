@@ -91,22 +91,21 @@ recvMsg user = do
     let msg = Msg t (username user) (userActv user) bstr
     atomically $ writeTChan ((userRooms user) Map.! (userActv user)) msg
 
-dupRooms :: Map Bytestring (TChan Msg) -> STM (Map Bytestring (TChan Msg))
-dupRooms = undefined
---dupRooms = do
---    foldfn key val acc = Map.insert key val acc
---    Map.foldrWithKey foldfn Map.empty
---    where
---        foldfn = 
-
+dupRooms :: Map ByteString (TChan Msg) -> STM (Map ByteString (TChan Msg))
+dupRooms = Map.foldrWithKey foldfn (return Map.empty)
+    where
+        foldfn key val acc = do
+            acc' <- acc
+            val' <- dupTChan val
+            return $ Map.insert key val' acc'
 
 newUser :: Handle -> MVar (Map ByteString (TChan Msg))-> IO ()
 newUser hand rooms' = do
     name <- getUsername hand
     rooms <- readMVar rooms'
     --room <- getUserRooms hand
-    usrrooms <- atomically $ 
-    userHandler $ User name hand "" rooms
+    usrrooms <- atomically $ dupRooms rooms
+    userHandler $ User name hand "" usrrooms
 
 -- prompts user for name
 getUsername :: Handle -> IO ByteString
