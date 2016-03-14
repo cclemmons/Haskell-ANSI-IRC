@@ -12,6 +12,7 @@ import Control.Concurrent.STM.TChan
 import Control.Monad
 import Data.Monoid ((<>))
 
+import Data.Time.Format
 import Data.Time.Calendar
 import Data.Time.Clock
 import Data.List (sort)
@@ -45,8 +46,8 @@ data Msg = Msg { msgTime :: UTCTime
 
 --announce :: User -> IO ()
 --announce user = do
---    let announce = systemMsg (username user ++ " has entered")
---    atomically $ Map.foldl (\acc room -> do acc >> announce room) (return ()) (userRooms user)
+--    let broadcast = systemMsg (username user ++ " has entered")
+--    atomically $ Map.foldl (\acc room -> do acc >> broadcast room) (return ()) (userRooms user)
 --    where
 --        foldfn acc room = do
             
@@ -57,10 +58,11 @@ systemMsg str room = do
     return $ Msg t "System" room str
 
 utcToBuilder :: UTCTime -> Builder
-utcToBuilder t = integerDec year <>. "-" <> intDec mon <>. "-" <> intDec day
-    where
-        (year, mon, day) = toGregorian $ utctDay t
-        a <>. b = a <> byteString b
+utcToBuilder t = stringUtf8 $ formatTime defaultTimeLocale "%R" t
+    --where
+    --    integerDec year <>. "-" <> intDec mon <>. "-" <> intDec day
+    --    (year, mon, day) = toGregorian $ utctDay t
+    --    a <>. b = a <> byteString b
 
 msgToBuilder :: Msg -> Builder
 msgToBuilder msg = byteString "<" <> username <>. " " <> room <> time <>. ">" <>." " <> cont <>. "\n"
@@ -139,7 +141,7 @@ acceptAndFork sock rooms = do
 
 addRoom :: ByteString -> Map ByteString (TChan Msg) -> STM (Map ByteString (TChan Msg))
 addRoom name map = do
-    tc <- newTChan
+    tc <- newBroadcastTChan
     return $ Map.insertWith (flip const) name tc map
 
 mainApp :: PortID -> IO ()
