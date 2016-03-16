@@ -10,6 +10,7 @@ import Data.Attoparsec.ByteString
 import qualified Data.Attoparsec.ByteString.Char8 as C8
 
 data Command = Leave ByteString | Join ByteString | Switch ByteString | Where | Quit | Help | Users | Resize | Clear | Malformed
+    deriving (Show)
 
 hGetString :: Handle -> IO ByteString
 hGetString hand = do
@@ -38,7 +39,10 @@ command = (Leave <$> (string ":leave " *> C8.takeTill isSpace)) <|>
           (const Malformed <$> string ":")
 
 parseCommand :: ByteString -> Maybe Command
-parseCommand = maybeResult . (parse command)
+parseCommand = undo . (parseOnly command)
+    where
+        undo (Left _) = Nothing
+        undo (Right comm) = Just comm
 
 userNameParser :: Parser ByteString
 userNameParser = (C8.takeWhile1 isAlphaNum)

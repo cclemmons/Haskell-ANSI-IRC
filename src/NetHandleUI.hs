@@ -79,6 +79,9 @@ sendBuilderOffset w bld off = do
     hPutBuilder (wHandle w) bld
     newInput w
 
+wClearLine :: Window -> IO ()
+wClearLine = hClearLine . wHandle
+
 sendBuilder :: Window -> Builder -> IO ()
 sendBuilder w bld = sendBuilderOffset w bld 0
 

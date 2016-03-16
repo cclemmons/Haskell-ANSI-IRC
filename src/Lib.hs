@@ -80,7 +80,7 @@ utcToBuilder t = stringUtf8 $ formatTime defaultTimeLocale "%R" t
 
 -- Formats a message into a bytestring builder
 msgToBuilder :: Msg -> Builder
-msgToBuilder msg = byteString "<" <> username <>. " " <> room <> time <>. ">" <>." " <> cont <>. "\n"
+msgToBuilder msg = byteString "<" <> username <>. "@" <> room <>. " " <> time <>. ">" <>." " <> cont <>. "\n"
     where
         username = byteString $ msgSender msg
         room = byteString $ msgRoom msg
@@ -130,13 +130,14 @@ recvMsg user@(User name handle active' rooms' window' _) = do
     active <- readMVar active'
     rooms <- readMVar rooms'
     window <- readMVar window'
+    wScrollPageDown window $ linesInput window bstr
+    wClearLine window
     case parseCommand bstr of
         Just command -> executeCommand user command
         Nothing -> do
             t <- getCurrentTime
             let msg = Msg t name active bstr
             atomically $ writeTChan (rooms Map.! active) msg
-    wScrollPageDown window $ linesInput window bstr
 
 -- This is the help message
 help :: ByteString
@@ -150,6 +151,7 @@ help = Bstr.concat
     , "You enter the chat in the default chat \"\" (empty string),\n"
     , "You can follow as many chats at once as you like, but your\n"
     , "messages will only be sent to one at a time\n"
+    , "The message header is <User@room hh:mm>\n"
     , "The following commands are supported:\n"
     , "\":quit\" to leave (You can also use ^D\n"
     , "\":help\" to see this message again\n"
@@ -168,14 +170,7 @@ executeCommand user (Leave room) = do
     bracketOnError (takeMVar mv) (putMVar mv) (\rooms -> do
         let rooms' = Map.delete room rooms
         putMVar mv rooms')
-executeCommand user (Join room) = do
-    addRoom (server user) room
-    serveRooms <- readMVar $ srvRooms $ server user
-    let tch = serveRooms Map.! room
-        mv = userRooms user
-    bracketOnError (takeMVar mv) (putMVar mv) (\rooms -> do
-        let rooms' = Map.insert room tch rooms
-        putMVar mv rooms')
+executeCommand user (Join room) = joinRoom user room
 executeCommand user (Switch room) = do
     let actvMv = userActv user
     rooms <- readMVar $ userRooms user
@@ -202,6 +197,20 @@ executeCommand user Resize = do
 executeCommand user Clear = (readMVar $ userWndw user) >>= clearWindow
 executeCommand user Malformed = executeCommand user Help
 
+-- Adds a User to a given room and announces them
+joinRoom :: User -> ByteString -> IO ()
+joinRoom user room = do
+    addRoom (server user) room
+    serveRooms <- readMVar $ srvRooms $ server user
+    let tch = serveRooms Map.! room
+        mv = userRooms user
+    bracketOnError (takeMVar mv) (putMVar mv) (\rooms -> do
+        tch' <- atomically $ dupTChan tch
+        let rooms' = Map.insert room tch' rooms
+        putMVar mv rooms'
+        msg <- systemMsg (Bstr.concat [userName user, " has joined"]) room
+        atomically $ writeTChan tch' msg)
+
 -- Sends a message to someone's window
 sendMsg :: User -> Msg -> IO ()
 sendMsg user msg = readMVar window >>= flip sendBuilder bld
@@ -223,10 +232,10 @@ newUser :: Handle -> Server -> IO ()
 newUser hand serve = do
     window <- hGetWindow hand >>= newMVar
     name <- getUsername hand serve
-    rooms <- readMVar $ srvRooms serve
-    usrrooms <- (atomically $ dupRooms rooms) >>= newMVar
+    usrrooms <- newMVar Map.empty
     active <- newMVar ""
     let user = User name hand active usrrooms window serve
+    joinRoom user ""
     systemMsg help "" >>= sendMsg user
     bracket (birthUser user) (killUser) (userHandler)
 
@@ -234,7 +243,6 @@ newUser hand serve = do
 birthUser :: User -> IO User
 birthUser user = do
     let (Server users _) = server user
-    announce user " has joined"
     addUser user
     return user
 
