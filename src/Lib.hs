@@ -188,7 +188,7 @@ dupRooms = Map.foldrWithKey foldfn (return Map.empty)
 newUser :: Handle -> Server -> IO ()
 newUser hand serve = do
     window <- hGetWindow hand
-    name <- getUsername hand
+    name <- getUsername hand serve
     rooms <- readMVar $ srvRooms serve
     --room <- getUserRooms hand
     usrrooms <- atomically $ dupRooms rooms
@@ -214,11 +214,23 @@ killUser user = do
     hPutBuilder (userHndl user) $ msgToBuilder $ msg
 
 -- prompts user for name
-getUsername :: Handle -> IO ByteString
-getUsername hand = do
-    Bstr.hPut hand "Please Enter a Username: "
+getUsername :: Handle -> Server -> IO ByteString
+getUsername hand serve = do
+    Bstr.hPut hand "Please Enter an Alphanumeric Username: "
     name <- Bstr.hGetLine hand
-    return name
+    parsed <- checkUserName name serve
+    let okay = (parsed /= "" && parsed /= "System")
+    if okay then return parsed else Bstr.hPut hand "Username Taken or Invalid.\n" >> getUsername hand serve
+
+checkUserName :: ByteString -> Server -> IO ByteString
+checkUserName name server = do
+    users <- readMVar $ srvUsers server
+    let parsed = parseUserName name
+    if Set.foldl' (\acc val -> acc || (userName val == parsed)) False users then return "" else return parsed
+
+unJust :: Maybe ByteString -> ByteString
+unJust Nothing = ""
+unJust (Just str) = str
 
 -- asks the user what rooms they would like to be a part of
 getUserRooms :: Handle -> IO (Set ByteString)

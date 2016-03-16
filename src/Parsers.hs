@@ -39,7 +39,10 @@ parseCommand :: ByteString -> Maybe Command
 parseCommand = maybeResult . (parse command)
 
 userNameParser :: Parser ByteString
-userNameParser = C8.takeWhile isAlphaNum
+userNameParser = (C8.takeWhile1 isAlphaNum)
 
-parseUserName :: ByteString -> Maybe ByteString
-parseUserName = maybeResult . (parse userNameParser)
+parseUserName :: ByteString -> ByteString
+parseUserName = undo . (parseOnly userNameParser)
+    where
+        undo (Left _) = ""
+        undo (Right str) = str
