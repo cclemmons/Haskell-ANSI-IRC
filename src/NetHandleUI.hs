@@ -71,7 +71,7 @@ sendBuilder :: Window -> Builder -> IO ()
 sendBuilder w bld = sendBuilderOffset w bld 0
 
 linesInput :: Window -> ByteString -> Int
-linesInput w st = negate $ width `div` nlength
+linesInput w st = negate $ nlength `div` width
     where
         nlength = negate $ Bstr.length st
         width = wWidth w

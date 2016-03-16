@@ -113,12 +113,12 @@ userHandler user = do
 
 -- recieves a user's message and writes it to their active channel
 recvMsg :: User -> IO ()
-recvMsg user = do
-    bstr <- Bstr.hGetLine $ userHndl user
+recvMsg (User name handle active rooms window) = do
+    bstr <- Bstr.hGetLine handle
     t <- getCurrentTime
-    let msg = Msg t (userName user) (userActv user) bstr
-    atomically $ writeTChan ((userRooms user) Map.! (userActv user)) msg
-    wScrollPageDown (userWndw user) 1
+    let msg = Msg t name active bstr
+    atomically $ writeTChan (rooms Map.! active) msg
+    wScrollPageDown window $ linesInput window bstr
 
 sendMsg :: User -> Msg -> IO ()
 sendMsg user msg = sendBuilder window bld
