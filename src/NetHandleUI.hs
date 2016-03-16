@@ -24,17 +24,17 @@ data Window = Window { wWidth :: Int
 csi :: [Int] -> String -> String
 csi args code = "\ESC[" ++ concat (intersperse ";" (map show args)) ++ code
 
-saveCursorCode :: String
-saveCursorCode = csi [] "s"
+--saveCursorCode :: String
+--saveCursorCode = csi [] "s"
 
-restoreCursorCode :: String
-restoreCursorCode = csi [] "u"
+--restoreCursorCode :: String
+--restoreCursorCode = csi [] "u"
 
-hSaveCursor :: Handle -> IO ()
-hSaveCursor h = hPutStr h saveCursorCode
+--hSaveCursor :: Handle -> IO ()
+--hSaveCursor h = hPutStr h saveCursorCode
 
-hRestoreCursor :: Handle -> IO ()
-hRestoreCursor h = hPutStr h restoreCursorCode
+--hRestoreCursor :: Handle -> IO ()
+--hRestoreCursor h = hPutStr h restoreCursorCode
 
 hGetSize :: Handle -> IO ()
 hGetSize hand = hPutStr hand dsr
@@ -86,3 +86,6 @@ linesInput w st = negate $ nlength `div` width
     where
         nlength = negate $ Bstr.length st
         width = wWidth w
+
+clearWindow :: Window -> IO ()
+clearWindow w = hClearScreen $ wHandle w

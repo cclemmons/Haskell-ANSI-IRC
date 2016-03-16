@@ -28,15 +28,21 @@ import Network.Socket (Socket)
 import System.IO
 
 import NetHandleUI
+import Parsers
+
+type Rooms = Map ByteString (TChan Msg)
 
 data Server = Server { users :: MVar (Set User)
-                     , rooms :: MVar (Map ByteString (TChan Msg))}
+                     , rooms :: MVar Rooms}
 
 data User = User { userName :: ByteString
                  , userHndl :: Handle
                  , userActv :: ByteString
-                 , userRooms :: Map ByteString (TChan Msg)
+                 , userRooms :: Rooms
                  , userWndw :: Window}
+instance Ord User where
+    compare a b = compare (userName a) (userName b)
+    (<=) a b = (<=) (userName a) (userName b)
 instance Eq User where
     (==) a b = (userName a) == (userName b)
 
@@ -115,12 +121,45 @@ userHandler user = do
 
 -- recieves a user's message and writes it to their active channel
 recvMsg :: User -> IO ()
-recvMsg (User name handle active rooms window) = do
+recvMsg user@(User name handle active rooms window) = do
     bstr <- Bstr.hGetLine handle
-    t <- getCurrentTime
-    let msg = Msg t name active bstr
-    atomically $ writeTChan (rooms Map.! active) msg
+    case parseCommand bstr of
+        Just command -> executeCommand user command
+        Nothing -> do
+            t <- getCurrentTime
+            let msg = Msg t name active bstr
+            atomically $ writeTChan (rooms Map.! active) msg
     wScrollPageDown window $ linesInput window bstr
+
+help :: ByteString
+help = Bstr.concat
+    [ "Welcome to the Chat!\n"
+    , "This Chat client supports ANSI terminals as long as they support scrolling\n"
+    , "There is no way to properly handle buffered input as you "
+    , "recieve messages, note that if you are composing a message and "
+    , "recieve a message, your work is likely to disappear, but it will "
+    , "likely reappear with a backspace.\n\n"
+    , "The following commands are supported:\n"
+    , "\":quit\" to leave (You can also use ^D\n"
+    , "\":help\" to see this message again\n"
+    , "\":leave name\" to leave the chatroom by name\n"
+    , "\":join name\" to join a chatroom by name\n"
+    , "\":users\" to see a list of users online\n"
+    , "\":resize\" to get send your window size to the server for proper UI\n"
+    , "\":clear\" to clear your screen\n"]
+
+executeCommand :: User -> Command -> IO ()
+executeCommand user (Leave room) = do
+    undefined
+executeCommand user (Join room) = do
+    undefined
+executeCommand user Quit = myThreadId >>= killThread
+executeCommand user Help = systemMsg help "" >>= sendMsg user
+executeCommand user Users = undefined
+executeCommand user Resize = do
+    undefined
+executeCommand user Clear = clearWindow $ userWndw user
+executeCommand user Malformed = executeCommand user Help
 
 -- Sends a message to someone's window
 sendMsg :: User -> Msg -> IO ()
@@ -130,7 +169,7 @@ sendMsg user msg = sendBuilder window bld
         window = userWndw user
 
 -- Generates a new map of rooms with duped tchans
-dupRooms :: Map ByteString (TChan Msg) -> STM (Map ByteString (TChan Msg))
+dupRooms :: Rooms -> STM (Rooms)
 dupRooms = Map.foldrWithKey foldfn (return Map.empty)
     where
         foldfn key val acc = do
@@ -139,7 +178,7 @@ dupRooms = Map.foldrWithKey foldfn (return Map.empty)
             return $ Map.insert key val' acc'
 
 -- User initialization that passes off the user to the user handler
-newUser :: Handle -> MVar (Map ByteString (TChan Msg))-> IO ()
+newUser :: Handle -> MVar (Rooms)-> IO ()
 newUser hand rooms' = do
     window <- hGetWindow hand
     name <- getUsername hand
@@ -147,6 +186,7 @@ newUser hand rooms' = do
     --room <- getUserRooms hand
     usrrooms <- atomically $ dupRooms rooms
     let user = User name hand "" usrrooms window
+    systemMsg help "" >>= sendMsg user
     bracket (announce user " has joined") (killUser) (userHandler)
 
 killUser :: User -> IO ()
@@ -167,21 +207,31 @@ getUserRooms :: Handle -> IO (Set ByteString)
 getUserRooms hand = return $ Set.singleton ("" :: ByteString)
 
 -- accepts a user and forks them into their own thread
-acceptAndFork :: Socket -> MVar (Map ByteString (TChan Msg)) -> IO ThreadId
+acceptAndFork :: Socket -> MVar (Rooms) -> IO ThreadId
 acceptAndFork sock rooms = do
     (hand, _, _) <- accept sock
     forkIO $ bracket (return hand) (hClose) (flip newUser rooms)
 
 -- adds a new room by name to a map of all available rooms
-addRoom :: ByteString -> Map ByteString (TChan Msg) -> STM (Map ByteString (TChan Msg))
-addRoom name map = do
+newRoom :: ByteString -> Rooms -> STM (Rooms)
+newRoom name map = do
     tc <- newBroadcastTChan
     return $ Map.insertWith (flip const) name tc map
 
 -- runs the chat server on a given Port. Initializes a default room
 mainApp :: PortID -> IO ()
 mainApp port = do
-    startingRooms <- (atomically $ addRoom "" Map.empty)
+    startingRooms <- (atomically $ newRoom "" Map.empty)
     rooms <- newMVar startingRooms 
+    users <- newMVar Set.empty
+    let serve = Server users rooms
     sock <- listenOn port
     forever $ acceptAndFork sock rooms
+
+addRoom :: Server -> ByteString -> IO Rooms
+addRoom serve@(Server users rooms) name = 
+    bracket (takeMVar rooms) (putMVar rooms) (atomically . (newRoom name))
+
+addUser :: Server -> User -> IO (Set User)
+addUser serve@(Server users rooms) user = 
+    bracket (takeMVar users) (putMVar users) (return . (Set.insert user))
