@@ -9,6 +9,8 @@ import qualified Data.ByteString as Bstr
 import Data.ByteString.Builder
 import qualified Data.ByteString.Read as Read
 
+import Parsers
+
 data Window = Window { wWidth :: Int
                      , wHeight :: Int
                      , wHandle :: Handle}
@@ -33,6 +35,12 @@ hSaveCursor h = hPutStr h saveCursorCode
 
 hRestoreCursor :: Handle -> IO ()
 hRestoreCursor h = hPutStr h restoreCursorCode
+
+hGetSize :: Handle -> IO ()
+hGetSize hand = hPutStr hand dsr
+
+dsr :: String
+dsr = csi [6] "n"
 ------------------------------------------------------------------------
 
 wScrollPageDown :: Window -> Int -> IO ()
@@ -47,15 +55,18 @@ getInt str hand = do
         Nothing -> getInt str hand
         Just (w, _) -> return w
 
-getWindow :: Handle -> IO Window
-getWindow hand = do
-    mode <- hGetBuffering hand
-    hSetBuffering hand LineBuffering
-    width <- getInt "Console Width" hand
-    height <- getInt "Console Height" hand
-    hPutStr hand "\n"
-    hSetBuffering hand mode
-    return $ Window width height hand
+hGetWindow :: Handle -> IO Window
+hGetWindow hand = do
+    hClearScreen hand
+    hSetCursorPosition hand 1 0
+    Bstr.hPut hand "Please press enter."
+    hSetCursorPosition hand 1000000 1000000
+    hGetSize hand
+    str <- hGetString hand
+    let Just (row, col) = parseWindowSize str
+    hClearScreen hand
+    hSetCursorPosition hand 0 0
+    return $ Window col row hand
 
 newInput :: Window -> IO ()
 newInput w = hSetCursorPosition (wHandle w) (wHeight w) 0

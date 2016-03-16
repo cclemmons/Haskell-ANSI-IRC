@@ -29,7 +29,7 @@ import System.IO
 
 import NetHandleUI
 
-data Server = Server { users :: MVar [User]
+data Server = Server { users :: MVar (Set User)
                      , rooms :: MVar (Map ByteString (TChan Msg))}
 
 data User = User { userName :: ByteString
@@ -37,7 +37,9 @@ data User = User { userName :: ByteString
                  , userActv :: ByteString
                  , userRooms :: Map ByteString (TChan Msg)
                  , userWndw :: Window}
-    deriving (Eq)
+instance Eq User where
+    (==) a b = (userName a) == (userName b)
+
 
 data Msg = Msg { msgTime :: UTCTime
                , msgSender :: ByteString
@@ -139,11 +141,11 @@ dupRooms = Map.foldrWithKey foldfn (return Map.empty)
 -- User initialization that passes off the user to the user handler
 newUser :: Handle -> MVar (Map ByteString (TChan Msg))-> IO ()
 newUser hand rooms' = do
+    window <- hGetWindow hand
     name <- getUsername hand
     rooms <- readMVar rooms'
     --room <- getUserRooms hand
     usrrooms <- atomically $ dupRooms rooms
-    window <- getWindow hand
     let user = User name hand "" usrrooms window
     bracket (announce user " has joined") (killUser) (userHandler)
 
