@@ -6,7 +6,6 @@ module Lib
 import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.MVar
-import Control.Concurrent.Chan
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TChan
 import Control.Monad
@@ -16,21 +15,19 @@ import Data.Time.Format
 import Data.Time.Calendar
 import Data.Time.Clock
 import Data.List (sort)
-
-import System.IO
+import Data.ByteString.Builder
 import Data.Set (Set)
+
 import qualified Data.Set as Set
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as Bstr
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+
 import Network (listenOn, accept, PortID)
 import Network.Socket (Socket)
 
-import Data.ByteString (ByteString, pack)
-import qualified Data.ByteString as Bstr
-import Data.ByteString.Builder
-
-msgTimeOut :: Int
-msgTimeOut = 100
+import System.IO
 
 data User = User { userName :: ByteString
                  , userHndl :: Handle
@@ -95,6 +92,10 @@ dQMsgs tc = do
     case elem of
         Nothing -> return []
         Just x -> liftM2 (:) (return x) (dQMsgs tc)
+
+-- How long each user loop waits to see if there is input
+msgTimeOut :: Int
+msgTimeOut = 100
 
 -- Final user thread function, checks for input and then recieves if
 -- necessary and sends information to the user
