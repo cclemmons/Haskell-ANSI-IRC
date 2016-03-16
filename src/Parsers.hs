@@ -9,7 +9,7 @@ import Data.Char
 import Data.Attoparsec.ByteString
 import qualified Data.Attoparsec.ByteString.Char8 as C8
 
-data Command = Leave ByteString | Join ByteString | Quit | Help | Users | Resize | Clear | Malformed
+data Command = Leave ByteString | Join ByteString | Switch ByteString | Where | Quit | Help | Users | Resize | Clear | Malformed
 
 hGetString :: Handle -> IO ByteString
 hGetString hand = do
@@ -28,6 +28,8 @@ parseWindowSize = maybeResult . (parse windowSize)
 command :: Parser Command
 command = (Leave <$> (string ":leave " *> C8.takeTill isSpace)) <|>
           (Join <$> (string ":join " *> C8.takeTill isSpace)) <|>
+          (Switch <$> (string ":switch " *> C8.takeTill isSpace)) <|>
+          (const Where <$> string ":where") <|>
           (const Quit <$> string ":quit") <|>
           (const Help <$> string ":help") <|>
           (const Users <$> string ":users") <|>

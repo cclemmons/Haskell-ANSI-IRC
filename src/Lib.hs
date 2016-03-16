@@ -38,9 +38,9 @@ data Server = Server { srvUsers :: MVar (Set User)
 
 data User = User { userName :: ByteString
                  , userHndl :: Handle
-                 , userActv :: ByteString
-                 , userRooms :: Rooms
-                 , userWndw :: Window
+                 , userActv :: MVar ByteString
+                 , userRooms :: MVar Rooms
+                 , userWndw :: MVar Window
                  , server :: Server}
 instance Ord User where
     compare a b = compare (userName a) (userName b)
@@ -64,7 +64,8 @@ announce user constr = do
             acc
             msg <- broadcast roomname
             atomically $ writeTChan tchan msg
-    Map.foldlWithKey foldfn (return ()) (userRooms user)
+    rooms <- readMVar $ userRooms user
+    Map.foldlWithKey foldfn (return ()) rooms
     return user
 
 -- Generates a message from the system with the given room and text
@@ -90,15 +91,15 @@ msgToBuilder msg = byteString "<" <> username <>. " " <> room <> time <>. ">" <>
 -- Flushes all the messages from user's rooms to their handle
 sendMsgs :: User -> IO ()
 sendMsgs user = do
-    let window = userWndw user
-    msgs <- atomically $ getMsgs user
+    window <- readMVar $ userWndw user
+    rooms <- readMVar $ userRooms user
+    msgs <- atomically $ getMsgs rooms
     foldl (\acc new -> acc >> (sendMsg user new)) (return ()) msgs
 
 -- generates a list of Msgs from a user's rooms
-getMsgs :: User -> STM [Msg]
-getMsgs user = liftM sort $ Map.foldl (concat) (return []) (tchs)
+getMsgs :: Rooms -> STM [Msg]
+getMsgs rooms = liftM sort $ Map.foldl (concat) (return []) (rooms)
     where concat acc tc = liftM2 (++) acc $ dQMsgs tc
-          tchs = userRooms user
 
 -- reads the messages from a given tchan into an list
 dQMsgs :: TChan Msg -> STM [Msg]
@@ -124,8 +125,11 @@ userHandler user = do
 
 -- recieves a user's message and writes it to their active channel
 recvMsg :: User -> IO ()
-recvMsg user@(User name handle active rooms window _) = do
+recvMsg user@(User name handle active' rooms' window' _) = do
     bstr <- Bstr.hGetLine handle
+    active <- readMVar active'
+    rooms <- readMVar rooms'
+    window <- readMVar window'
     case parseCommand bstr of
         Just command -> executeCommand user command
         Nothing -> do
@@ -143,34 +147,64 @@ help = Bstr.concat
     , "recieve messages, note that if you are composing a message and "
     , "recieve a message, your work is likely to disappear, but it will "
     , "likely reappear with a backspace.\n\n"
+    , "You enter the chat in the default chat \"\" (empty string),\n"
+    , "You can follow as many chats at once as you like, but your\n"
+    , "messages will only be sent to one at a time\n"
     , "The following commands are supported:\n"
     , "\":quit\" to leave (You can also use ^D\n"
     , "\":help\" to see this message again\n"
     , "\":leave name\" to leave the chatroom by name\n"
     , "\":join name\" to join a chatroom by name\n"
+    , "\":switch name\" to switch your active room to a given room\n"
+    , "\":where\" to tell you what your current active room is\n"
     , "\":users\" to see a list of users online\n"
-    , "\":resize\" to get send your window size to the server for proper UI\n"
+    , "\":resize\" to re-send your window size to the server for proper UI, also clears screen\n"
     , "\":clear\" to clear your screen\n"]
 
 -- Executes a command for a given user
 executeCommand :: User -> Command -> IO ()
 executeCommand user (Leave room) = do
-    undefined
+    let mv = userRooms user
+    bracketOnError (takeMVar mv) (putMVar mv) (\rooms -> do
+        let rooms' = Map.delete room rooms
+        putMVar mv rooms')
 executeCommand user (Join room) = do
-    undefined
+    addRoom (server user) room
+    serveRooms <- readMVar $ srvRooms $ server user
+    let tch = serveRooms Map.! room
+        mv = userRooms user
+    bracketOnError (takeMVar mv) (putMVar mv) (\rooms -> do
+        let rooms' = Map.insert room tch rooms
+        putMVar mv rooms')
+executeCommand user (Switch room) = do
+    let actvMv = userActv user
+    rooms <- readMVar $ userRooms user
+    if room `Map.member` rooms then
+            swapMVar actvMv room >> return ()
+        else
+            systemMsg "You cannot switch to a room you are not a member of." "" >>= sendMsg user
+executeCommand user Where = do
+    activ <- readMVar $ userActv user
+    systemMsg (Bstr.concat ["Your active room is :", activ]) "" >>= sendMsg user
 executeCommand user Quit = myThreadId >>= killThread
 executeCommand user Help = systemMsg help "" >>= sendMsg user
 executeCommand user Users = do
     users <- readMVar $ srvUsers $ server user
     systemMsg (pack $ show $ Set.toList users) "" >>= sendMsg user
 executeCommand user Resize = do
-    undefined
-executeCommand user Clear = clearWindow $ userWndw user
+    let mv = userWndw user
+        hand = userHndl user
+    bracketOnError (takeMVar mv) (putMVar mv) (\_ -> do
+        w <- hGetWindow hand
+        putMVar mv w
+        newInput w)
+
+executeCommand user Clear = (readMVar $ userWndw user) >>= clearWindow
 executeCommand user Malformed = executeCommand user Help
 
 -- Sends a message to someone's window
 sendMsg :: User -> Msg -> IO ()
-sendMsg user msg = sendBuilder window bld
+sendMsg user msg = readMVar window >>= flip sendBuilder bld
     where
         bld = msgToBuilder msg
         window = userWndw user
@@ -187,12 +221,12 @@ dupRooms = Map.foldrWithKey foldfn (return Map.empty)
 -- User initialization that passes off the user to the user handler
 newUser :: Handle -> Server -> IO ()
 newUser hand serve = do
-    window <- hGetWindow hand
+    window <- hGetWindow hand >>= newMVar
     name <- getUsername hand serve
     rooms <- readMVar $ srvRooms serve
-    --room <- getUserRooms hand
-    usrrooms <- atomically $ dupRooms rooms
-    let user = User name hand "" usrrooms window serve
+    usrrooms <- (atomically $ dupRooms rooms) >>= newMVar
+    active <- newMVar ""
+    let user = User name hand active usrrooms window serve
     systemMsg help "" >>= sendMsg user
     bracket (birthUser user) (killUser) (userHandler)
 
@@ -227,14 +261,6 @@ checkUserName name server = do
     users <- readMVar $ srvUsers server
     let parsed = parseUserName name
     if Set.foldl' (\acc val -> acc || (userName val == parsed)) False users then return "" else return parsed
-
-unJust :: Maybe ByteString -> ByteString
-unJust Nothing = ""
-unJust (Just str) = str
-
--- asks the user what rooms they would like to be a part of
-getUserRooms :: Handle -> IO (Set ByteString)
-getUserRooms hand = return $ Set.singleton ("" :: ByteString)
 
 -- accepts a user and forks them into their own thread
 acceptAndFork :: Socket -> Server -> IO ThreadId

@@ -75,6 +75,7 @@ sendBuilderOffset :: Window -> Builder -> Int -> IO ()
 sendBuilderOffset w bld off = do
     hScrollPageDown (wHandle w) off
     newInput w
+    hClearLine (wHandle w)
     hPutBuilder (wHandle w) bld
     newInput w
 
