@@ -120,6 +120,7 @@ recvMsg (User name handle active rooms window) = do
     atomically $ writeTChan (rooms Map.! active) msg
     wScrollPageDown window $ linesInput window bstr
 
+-- Sends a message to someone's window
 sendMsg :: User -> Msg -> IO ()
 sendMsg user msg = sendBuilder window bld
     where
