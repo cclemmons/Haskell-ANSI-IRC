@@ -12,7 +12,7 @@ import qualified Data.ByteString.Read as Read
 data Window = Window {wWidth :: Int
                      , wHeight :: Int
                      , wHandle :: Handle}
-    deriving (Show)
+    deriving (Eq, Show)
 
 ------------------------------------------------------------------------
 -- Adding functionality to ANSI terminal
@@ -35,6 +35,9 @@ hRestoreCursor :: Handle -> IO ()
 hRestoreCursor h = hPutStr h restoreCursorCode
 ------------------------------------------------------------------------
 
+wScrollPageDown :: Window -> Int -> IO ()
+wScrollPageDown w n = hScrollPageDown (wHandle w) n
+
 getInt :: ByteString -> Handle -> IO Int
 getInt str hand = do
     Bstr.hPut hand $ Bstr.concat ["Please Enter Your ", str, " : "]
@@ -50,6 +53,7 @@ getWindow hand = do
     hSetBuffering hand LineBuffering
     width <- getInt "Console Width" hand
     height <- getInt "Console Height" hand
+    hPutStr hand "\n"
     hSetBuffering hand mode
     return $ Window width height hand
 
@@ -58,7 +62,7 @@ newInput w = hSetCursorPosition (wHandle w) (wHeight w) 0
 
 sendMsg :: Window -> Builder -> IO ()
 sendMsg w bld = do
+    --wScrollPageDown w 1
     newInput w
     hPutBuilder (wHandle w) bld
     newInput w
-    hScrollPageUp (wHandle w) 1

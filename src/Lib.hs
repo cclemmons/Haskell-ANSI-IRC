@@ -1,7 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Lib
-    ( mainApp
-    ) where
+module Lib where
 
 import Control.Exception
 import Control.Concurrent
@@ -29,10 +27,16 @@ import Network.Socket (Socket)
 
 import System.IO
 
+import NetHandleUI
+
+data Server = Server { users :: MVar [User]
+                     , rooms :: MVar (Map ByteString (TChan Msg))}
+
 data User = User { userName :: ByteString
                  , userHndl :: Handle
                  , userActv :: ByteString
-                 , userRooms :: Map ByteString (TChan Msg)}
+                 , userRooms :: Map ByteString (TChan Msg)
+                 , userWndw :: Window}
     deriving (Eq)
 
 data Msg = Msg { msgTime :: UTCTime
@@ -75,9 +79,9 @@ msgToBuilder msg = byteString "<" <> username <>. " " <> room <> time <>. ">" <>
 -- Flushes all the messages from user's rooms to their handle
 sendMsgs :: User -> IO ()
 sendMsgs user = do
-    let handle = userHndl user
+    let window = userWndw user
     msgs <- atomically $ getMsgs user
-    foldl (\acc new -> acc >> (hPutBuilder handle $ msgToBuilder new)) (return ()) msgs
+    foldl (\acc new -> acc >> (sendMsg window $ msgToBuilder new)) (return ()) msgs
 
 -- generates a list of Msgs from a user's rooms
 getMsgs :: User -> STM [Msg]
@@ -114,6 +118,7 @@ recvMsg user = do
     t <- getCurrentTime
     let msg = Msg t (userName user) (userActv user) bstr
     atomically $ writeTChan ((userRooms user) Map.! (userActv user)) msg
+    wScrollPageDown (userWndw user) 1
 
 -- Generates a new map of rooms with duped tchans
 dupRooms :: Map ByteString (TChan Msg) -> STM (Map ByteString (TChan Msg))
@@ -131,7 +136,8 @@ newUser hand rooms' = do
     rooms <- readMVar rooms'
     --room <- getUserRooms hand
     usrrooms <- atomically $ dupRooms rooms
-    let user = User name hand "" usrrooms
+    window <- getWindow hand
+    let user = User name hand "" usrrooms window
     bracket (announce user " has joined") (killUser) (userHandler)
 
 killUser :: User -> IO ()
