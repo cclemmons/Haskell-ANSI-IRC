@@ -134,6 +134,7 @@ recvMsg user@(User name handle active rooms window _) = do
             atomically $ writeTChan (rooms Map.! active) msg
     wScrollPageDown window $ linesInput window bstr
 
+-- This is the help message
 help :: ByteString
 help = Bstr.concat
     [ "Welcome to the Chat!\n"
@@ -151,6 +152,7 @@ help = Bstr.concat
     , "\":resize\" to get send your window size to the server for proper UI\n"
     , "\":clear\" to clear your screen\n"]
 
+-- Executes a command for a given user
 executeCommand :: User -> Command -> IO ()
 executeCommand user (Leave room) = do
     undefined
@@ -194,6 +196,7 @@ newUser hand serve = do
     systemMsg help "" >>= sendMsg user
     bracket (birthUser user) (killUser) (userHandler)
 
+-- Births a user by addint them to the server and announcing them
 birthUser :: User -> IO User
 birthUser user = do
     let (Server users _) = server user
@@ -201,11 +204,12 @@ birthUser user = do
     addUser user
     return user
 
+-- Kills a user and shugs down their thread
 killUser :: User -> IO ()
 killUser user = do
     let (Server users _) = server user
     announce user " has left"
-    bracket (takeMVar users) (putMVar users) (return . (Set.delete user))
+    removeUser user
     msg <- systemMsg (Bstr.concat ["Goodbye ", userName user]) ""
     hPutBuilder (userHndl user) $ msgToBuilder $ msg
 
@@ -242,10 +246,17 @@ mainApp port = do
     sock <- listenOn port
     forever $ acceptAndFork sock serve
 
+-- adds a room to the server by name
 addRoom :: Server -> ByteString -> IO ()
 addRoom serve@(Server users rooms) name = 
     bracketOnError (takeMVar rooms) (putMVar rooms) (\r -> (atomically $ newRoom name r) >>= putMVar rooms)
 
+-- adds a given user to the server
 addUser :: User -> IO ()
 addUser user = let serve@(Server users rooms) = server user in
     bracketOnError (takeMVar users) (putMVar users) ((putMVar users) . Set.insert user)
+
+-- removes a given user from the server
+removeUser :: User -> IO ()
+removeUser user = let serve@(Server users rooms) = server user in
+    bracketOnError (takeMVar users) (putMVar users) ((putMVar users) . Set.delete user)
