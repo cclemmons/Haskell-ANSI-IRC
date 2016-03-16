@@ -18,6 +18,7 @@ import Data.Set (Set)
 
 import qualified Data.Set as Set
 import Data.ByteString (ByteString)
+import Data.ByteString.Char8 (pack, unpack)
 import qualified Data.ByteString as Bstr
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -32,20 +33,22 @@ import Parsers
 
 type Rooms = Map ByteString (TChan Msg)
 
-data Server = Server { users :: MVar (Set User)
-                     , rooms :: MVar Rooms}
+data Server = Server { srvUsers :: MVar (Set User)
+                     , srvRooms :: MVar Rooms}
 
 data User = User { userName :: ByteString
                  , userHndl :: Handle
                  , userActv :: ByteString
                  , userRooms :: Rooms
-                 , userWndw :: Window}
+                 , userWndw :: Window
+                 , server :: Server}
 instance Ord User where
     compare a b = compare (userName a) (userName b)
     (<=) a b = (<=) (userName a) (userName b)
 instance Eq User where
     (==) a b = (userName a) == (userName b)
-
+instance Show User where
+    show = unpack . userName
 
 data Msg = Msg { msgTime :: UTCTime
                , msgSender :: ByteString
@@ -121,7 +124,7 @@ userHandler user = do
 
 -- recieves a user's message and writes it to their active channel
 recvMsg :: User -> IO ()
-recvMsg user@(User name handle active rooms window) = do
+recvMsg user@(User name handle active rooms window _) = do
     bstr <- Bstr.hGetLine handle
     case parseCommand bstr of
         Just command -> executeCommand user command
@@ -155,7 +158,9 @@ executeCommand user (Join room) = do
     undefined
 executeCommand user Quit = myThreadId >>= killThread
 executeCommand user Help = systemMsg help "" >>= sendMsg user
-executeCommand user Users = undefined
+executeCommand user Users = do
+    users <- readMVar $ srvUsers $ server user
+    systemMsg (pack $ show $ Set.toList users) "" >>= sendMsg user
 executeCommand user Resize = do
     undefined
 executeCommand user Clear = clearWindow $ userWndw user
@@ -178,20 +183,29 @@ dupRooms = Map.foldrWithKey foldfn (return Map.empty)
             return $ Map.insert key val' acc'
 
 -- User initialization that passes off the user to the user handler
-newUser :: Handle -> MVar (Rooms)-> IO ()
-newUser hand rooms' = do
+newUser :: Handle -> Server -> IO ()
+newUser hand serve = do
     window <- hGetWindow hand
     name <- getUsername hand
-    rooms <- readMVar rooms'
+    rooms <- readMVar $ srvRooms serve
     --room <- getUserRooms hand
     usrrooms <- atomically $ dupRooms rooms
-    let user = User name hand "" usrrooms window
+    let user = User name hand "" usrrooms window serve
     systemMsg help "" >>= sendMsg user
-    bracket (announce user " has joined") (killUser) (userHandler)
+    bracket (birthUser user) (killUser) (userHandler)
+
+birthUser :: User -> IO User
+birthUser user = do
+    let (Server users _) = server user
+    announce user " has joined"
+    addUser user
+    return user
 
 killUser :: User -> IO ()
 killUser user = do
-    flip announce " has left" user
+    let (Server users _) = server user
+    announce user " has left"
+    bracket (takeMVar users) (putMVar users) (return . (Set.delete user))
     msg <- systemMsg (Bstr.concat ["Goodbye ", userName user]) ""
     hPutBuilder (userHndl user) $ msgToBuilder $ msg
 
@@ -207,10 +221,10 @@ getUserRooms :: Handle -> IO (Set ByteString)
 getUserRooms hand = return $ Set.singleton ("" :: ByteString)
 
 -- accepts a user and forks them into their own thread
-acceptAndFork :: Socket -> MVar (Rooms) -> IO ThreadId
-acceptAndFork sock rooms = do
+acceptAndFork :: Socket -> Server -> IO ThreadId
+acceptAndFork sock serve = do
     (hand, _, _) <- accept sock
-    forkIO $ bracket (return hand) (hClose) (flip newUser rooms)
+    forkIO $ bracket (return hand) (hClose) (flip newUser serve)
 
 -- adds a new room by name to a map of all available rooms
 newRoom :: ByteString -> Rooms -> STM (Rooms)
@@ -226,12 +240,12 @@ mainApp port = do
     users <- newMVar Set.empty
     let serve = Server users rooms
     sock <- listenOn port
-    forever $ acceptAndFork sock rooms
+    forever $ acceptAndFork sock serve
 
-addRoom :: Server -> ByteString -> IO Rooms
+addRoom :: Server -> ByteString -> IO ()
 addRoom serve@(Server users rooms) name = 
-    bracket (takeMVar rooms) (putMVar rooms) (atomically . (newRoom name))
+    bracketOnError (takeMVar rooms) (putMVar rooms) (\r -> (atomically $ newRoom name r) >>= putMVar rooms)
 
-addUser :: Server -> User -> IO (Set User)
-addUser serve@(Server users rooms) user = 
-    bracket (takeMVar users) (putMVar users) (return . (Set.insert user))
+addUser :: User -> IO ()
+addUser user = let serve@(Server users rooms) = server user in
+    bracketOnError (takeMVar users) (putMVar users) ((putMVar users) . Set.insert user)

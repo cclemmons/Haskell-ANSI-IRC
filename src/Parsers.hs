@@ -37,3 +37,9 @@ command = (Leave <$> (string ":leave " *> C8.takeTill isSpace)) <|>
 
 parseCommand :: ByteString -> Maybe Command
 parseCommand = maybeResult . (parse command)
+
+userNameParser :: Parser ByteString
+userNameParser = C8.takeWhile isAlphaNum
+
+parseUserName :: ByteString -> Maybe ByteString
+parseUserName = maybeResult . (parse userNameParser)
