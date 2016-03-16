@@ -9,7 +9,7 @@ import qualified Data.ByteString as Bstr
 import Data.ByteString.Builder
 import qualified Data.ByteString.Read as Read
 
-data Window = Window {wWidth :: Int
+data Window = Window { wWidth :: Int
                      , wHeight :: Int
                      , wHandle :: Handle}
     deriving (Eq, Show)
@@ -60,9 +60,18 @@ getWindow hand = do
 newInput :: Window -> IO ()
 newInput w = hSetCursorPosition (wHandle w) (wHeight w) 0
 
-sendMsg :: Window -> Builder -> IO ()
-sendMsg w bld = do
-    --wScrollPageDown w 1
+sendBuilderOffset :: Window -> Builder -> Int -> IO ()
+sendBuilderOffset w bld off = do
+    hScrollPageDown (wHandle w) off
     newInput w
     hPutBuilder (wHandle w) bld
     newInput w
+
+sendBuilder :: Window -> Builder -> IO ()
+sendBuilder w bld = sendBuilderOffset w bld 0
+
+linesInput :: Window -> ByteString -> Int
+linesInput w st = negate $ width `div` nlength
+    where
+        nlength = negate $ Bstr.length st
+        width = wWidth w

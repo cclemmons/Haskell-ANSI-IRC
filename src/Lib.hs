@@ -81,7 +81,7 @@ sendMsgs :: User -> IO ()
 sendMsgs user = do
     let window = userWndw user
     msgs <- atomically $ getMsgs user
-    foldl (\acc new -> acc >> (sendMsg window $ msgToBuilder new)) (return ()) msgs
+    foldl (\acc new -> acc >> (sendMsg user new)) (return ()) msgs
 
 -- generates a list of Msgs from a user's rooms
 getMsgs :: User -> STM [Msg]
@@ -119,6 +119,12 @@ recvMsg user = do
     let msg = Msg t (userName user) (userActv user) bstr
     atomically $ writeTChan ((userRooms user) Map.! (userActv user)) msg
     wScrollPageDown (userWndw user) 1
+
+sendMsg :: User -> Msg -> IO ()
+sendMsg user msg = sendBuilder window bld
+    where
+        bld = msgToBuilder msg
+        window = userWndw user
 
 -- Generates a new map of rooms with duped tchans
 dupRooms :: Map ByteString (TChan Msg) -> STM (Map ByteString (TChan Msg))
