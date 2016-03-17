@@ -24,28 +24,19 @@ data Window = Window { wWidth :: Int
 csi :: [Int] -> String -> String
 csi args code = "\ESC[" ++ concat (intersperse ";" (map show args)) ++ code
 
---saveCursorCode :: String
---saveCursorCode = csi [] "s"
-
---restoreCursorCode :: String
---restoreCursorCode = csi [] "u"
-
---hSaveCursor :: Handle -> IO ()
---hSaveCursor h = hPutStr h saveCursorCode
-
---hRestoreCursor :: Handle -> IO ()
---hRestoreCursor h = hPutStr h restoreCursorCode
-
+-- Sends the dsr code to the Handle
 hGetSize :: Handle -> IO ()
-hGetSize hand = hPutStr hand dsr
+hGetSize hand = hPutStr hand dsrCode
 
-dsr :: String
-dsr = csi [6] "n"
+dsrCode :: String
+dsrCode = csi [6] "n"
 ------------------------------------------------------------------------
 
+-- scrolls a window down a given number of lines
 wScrollPageDown :: Window -> Int -> IO ()
 wScrollPageDown w n = hScrollPageDown (wHandle w) n
 
+-- Prompts handle for an int with the given prompt
 getInt :: ByteString -> Handle -> IO Int
 getInt str hand = do
     Bstr.hPut hand $ Bstr.concat ["Please Enter Your ", str, " : "]
@@ -55,6 +46,7 @@ getInt str hand = do
         Nothing -> getInt str hand
         Just (w, _) -> return w
 
+-- given a handle, retruns the appropriately sized window by using DSR
 hGetWindow :: Handle -> IO Window
 hGetWindow hand = do
     hClearScreen hand
@@ -68,9 +60,11 @@ hGetWindow hand = do
     hSetCursorPosition hand 0 0
     return $ Window col row hand
 
+-- moves the cursor to the newinput location in the window
 newInput :: Window -> IO ()
 newInput w = hSetCursorPosition (wHandle w) (wHeight w) 0
 
+-- sends a builder to a window, first scrolling down a given number of lines
 sendBuilderOffset :: Window -> Builder -> Int -> IO ()
 sendBuilderOffset w bld off = do
     hScrollPageDown (wHandle w) off
@@ -79,17 +73,21 @@ sendBuilderOffset w bld off = do
     hPutBuilder (wHandle w) bld
     newInput w
 
-wClearLine :: Window -> IO ()
-wClearLine = hClearLine . wHandle
-
+-- sends a builder with a zero offset
 sendBuilder :: Window -> Builder -> IO ()
 sendBuilder w bld = sendBuilderOffset w bld 0
 
+-- clears the line the cursors is on in the given window
+wClearLine :: Window -> IO ()
+wClearLine = hClearLine . wHandle
+
+-- given a window and a bytestring, calculates the number of lines it tookup
 linesInput :: Window -> ByteString -> Int
 linesInput w st = negate $ nlength `div` width
     where
         nlength = negate $ Bstr.length st
         width = wWidth w
 
+-- clears the given window
 clearWindow :: Window -> IO ()
 clearWindow w = hClearScreen $ wHandle w
