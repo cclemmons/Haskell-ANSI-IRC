@@ -34,6 +34,7 @@ dsrCode = csi [6] "n"
 
 -- scrolls a window down a given number of lines
 wScrollPageDown :: Window -> Int -> IO ()
+wScrollPageDown _ 0 = return ()
 wScrollPageDown w n = hScrollPageDown (wHandle w) n
 
 -- Prompts handle for an int with the given prompt
@@ -67,7 +68,7 @@ newInput w = hSetCursorPosition (wHandle w) (wHeight w) 0
 -- sends a builder to a window, first scrolling down a given number of lines
 sendBuilderOffset :: Window -> Builder -> Int -> IO ()
 sendBuilderOffset w bld off = do
-    hScrollPageDown (wHandle w) off
+    hScrollPageDown (wHandle w) (off)
     newInput w
     hClearLine (wHandle w)
     hPutBuilder (wHandle w) bld
@@ -81,7 +82,7 @@ sendBuilder w bld = sendBuilderOffset w bld 0
 wClearLine :: Window -> IO ()
 wClearLine = hClearLine . wHandle
 
--- given a window and a bytestring, calculates the number of lines it tookup
+-- given a window and a bytestring, calculates the number of lines it took up
 linesInput :: Window -> ByteString -> Int
 linesInput w st = negate $ nlength `div` width
     where

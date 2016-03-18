@@ -130,7 +130,7 @@ recvMsg user@(User name handle active' rooms' window' _) = do
     active <- readMVar active'
     rooms <- readMVar rooms'
     window <- readMVar window'
-    wScrollPageDown window $ linesInput window bstr
+    wScrollPageDown window $ (linesInput window bstr - 1)
     wClearLine window
     case parseCommand bstr of
         Just command -> executeCommand user command
