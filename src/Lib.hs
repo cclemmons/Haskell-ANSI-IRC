@@ -130,7 +130,7 @@ recvMsg user@(User name handle active' rooms' window' _) = do
     active <- readMVar active'
     rooms <- readMVar rooms'
     window <- readMVar window'
-    wScrollPageDown window $ (linesInput window bstr - 1)
+    wScrollPageDown window $ (linesInput window bstr)
     wClearLine window
     case parseCommand bstr of
         Just command -> executeCommand user command
@@ -253,7 +253,7 @@ killUser user = do
     announce user " has left"
     removeUser user
     msg <- systemMsg (Bstr.concat ["Goodbye ", userName user]) ""
-    hPutBuilder (userHndl user) $ msgToBuilder $ msg
+    sendMsg user msg
 
 -- prompts user for name
 getUsername :: Handle -> Server -> IO ByteString

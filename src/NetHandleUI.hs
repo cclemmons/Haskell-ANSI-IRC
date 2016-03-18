@@ -72,6 +72,7 @@ sendBuilderOffset w bld off = do
     newInput w
     hClearLine (wHandle w)
     hPutBuilder (wHandle w) bld
+    hScrollPageUp (wHandle w) 1
     newInput w
 
 -- sends a builder with a zero offset
